@@ -10,6 +10,7 @@ dependencies = [
  "bytes",
  "dashmap",
  "env_logger",
+ "log",
  "rmp-serde",
  "serde",
  "serde_json",

@@ -16,15 +16,23 @@ impl Cache {
         }
     }
 
+
+    // Synchronously (de)serialize and (de)compress.
+    // (It is wrapped into spawn_blocking in the handlers so that the async reactor is not blocked.)
     pub fn put(&self, key: String, value: impl Serialize) {
-        let serialized = to_vec(&value).unwrap(); // MessagePack Serialization
-        let compressed = Encoder::new().compress_vec(&serialized).unwrap();
-        self.store.insert(key, Bytes::from(compressed)); // Zero-copy storage
+        // MessagePack serialization – you may consider using other faster serializers if needed.
+        let serialized = to_vec(&value).expect("Serialization error");
+        // Compress using snap. If desired, adjust compression parameters or swap out for a faster method.
+        let compressed = Encoder::new().compress_vec(&serialized).expect("Compression error");
+        // Insert using zero–copy Bytes.
+        self.store.insert(key, Bytes::from(compressed));
     }
 
     pub fn get<T: for<'a> Deserialize<'a>>(&self, key: &str) -> Option<T> {
         self.store.get(key).and_then(|v| {
+            // Decompress data
             let decompressed = Decoder::new().decompress_vec(&v).ok()?;
+            // Deserialize MessagePack bytes into T.
             from_slice(&decompressed).ok()
         })
     }

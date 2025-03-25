@@ -1,16 +1,16 @@
-/target/
+/target
 /bin/
 /obj/
 
-/.idea/
+/.idea
 *.iml
 
-__pycache__/
+/__pycache__
 *.pyc
 *.pyo
 *.pyd
 
-/Cargo.lock
+.Cargo.lock
 
 *.log
 *.tmp
