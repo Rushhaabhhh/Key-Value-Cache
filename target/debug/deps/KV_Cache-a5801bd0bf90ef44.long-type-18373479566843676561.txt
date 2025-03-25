@@ -1,0 +1,1 @@
+Rc<[Box<(dyn Fn() -> Pin<Box<(dyn std::future::Future<Output = Result<Box<(dyn actix_web::data::DataFactory + 'static)>, ()>> + 'static)>> + 'static)>]>

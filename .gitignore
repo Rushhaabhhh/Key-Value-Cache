@@ -1,0 +1,16 @@
+/target/
+/bin/
+/obj/
+
+/.idea/
+*.iml
+
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+/Cargo.lock
+
+*.log
+*.tmp
