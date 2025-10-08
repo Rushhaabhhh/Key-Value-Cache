@@ -15,6 +15,47 @@ const (
 	numShards       = 4
 )
 
+type CacheShard struct {
+	sync.RWMutex
+	items map[string]string
+	count int
+}
+
+func NewCacheShard() *CacheShard {
+	return &CacheShard{
+		items: make(map[string]string, 700000),
+		count: 0,
+	}
+}
+
+
+func (cs *CacheShard) Get(key string) (string, bool) {
+	cs.RLock()
+	val, ok := cs.items[key]
+	cs.RUnlock()
+	return val, ok
+}
+
+type ShardedCache struct {
+	shards    []*CacheShard
+	shardMask uint64
+}
+
+func NewShardedCache(numShards int) *ShardedCache {
+	powerOf2 := 1
+	for powerOf2 < numShards {
+		powerOf2 *= 2
+	}
+	sc := &ShardedCache{
+		shards:    make([]*CacheShard, powerOf2),
+		shardMask: uint64(powerOf2 - 1),
+	}
+	for i := 0; i < powerOf2; i++ {
+		sc.shards[i] = NewCacheShard()
+	}
+	return sc
+}
+
 func djb2Hash(s string) uint64 {
 	var hash uint64 = 5381
 	for i := 0; i < len(s); i++ {
@@ -23,6 +64,11 @@ func djb2Hash(s string) uint64 {
 	return hash
 }
 
+
+func (sc *ShardedCache) Get(key string) (string, bool) {
+	shard := sc.shards[djb2Hash(key)&sc.shardMask]
+	return shard.Get(key)
+}
 
 type PutRequest struct {
 	Key   string `json:"key"`
@@ -40,6 +86,7 @@ var (
 	keyNotFoundBytes = []byte(`{"status":"ERROR","message":"Key not found."}`)
 )
 
+var cache *ShardedCache
 
 func requestHandler(ctx *fasthttp.RequestCtx) {
 	switch string(ctx.Method()) {
@@ -70,7 +117,12 @@ func requestHandler(ctx *fasthttp.RequestCtx) {
 				ctx.Error("Key parameter is required", fasthttp.StatusBadRequest)
 				return
 			}
-
+			value, found := cache.Get(key)
+			if !found {
+				ctx.Response.Header.Set("Content-Type", "application/json")
+				ctx.SetBody(keyNotFoundBytes)
+				return
+			}
 			resp := GetResponse{
 				Status: "OK",
 				Key:    key,
@@ -91,9 +143,11 @@ func requestHandler(ctx *fasthttp.RequestCtx) {
 
 func main() {
 	runtime.GOMAXPROCS(runtime.NumCPU())
+	cache = NewShardedCache(numShards)
+
 	s := &fasthttp.Server{
 		Handler:              requestHandler,
-		Name:                 "KeyValueCache",
+		Name:                 "UltraFastKVCache",
 		ReadTimeout:          5 * time.Second,
 		WriteTimeout:         5 * time.Second,
 		MaxConnsPerIP:        0,
