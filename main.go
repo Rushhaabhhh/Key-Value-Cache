@@ -28,6 +28,22 @@ func NewCacheShard() *CacheShard {
 	}
 }
 
+func (cs *CacheShard) Put(key, value string) {
+	cs.Lock()
+	if cs.count >= 700000 {
+		log.Println("Cache is full, removing an item")
+		for k := range cs.items {
+			delete(cs.items, k)
+			cs.count--
+			break
+		}
+	}
+	if _, exists := cs.items[key]; !exists {
+		cs.count++
+	}
+	cs.items[key] = value
+	cs.Unlock()
+}
 
 func (cs *CacheShard) Get(key string) (string, bool) {
 	cs.RLock()
@@ -64,6 +80,10 @@ func djb2Hash(s string) uint64 {
 	return hash
 }
 
+func (sc *ShardedCache) Put(key, value string) {
+	shard := sc.shards[djb2Hash(key)&sc.shardMask]
+	shard.Put(key, value)
+}
 
 func (sc *ShardedCache) Get(key string) (string, bool) {
 	shard := sc.shards[djb2Hash(key)&sc.shardMask]
@@ -106,6 +126,7 @@ func requestHandler(ctx *fasthttp.RequestCtx) {
 				ctx.Error("Bad request", fasthttp.StatusBadRequest)
 				return
 			}
+			cache.Put(req.Key, req.Value)
 			ctx.Response.Header.Set("Content-Type", "application/json")
 			ctx.SetBody(putSuccessBytes)
 			return
