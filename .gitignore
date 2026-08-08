@@ -1,0 +1,4 @@
+/key-value-cache
+*.test
+*.out
+loadtest_results.log

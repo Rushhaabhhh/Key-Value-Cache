@@ -1,45 +1,54 @@
 #!/bin/bash
+# Applies Linux kernel networking tunables for high-connection-count
+# workloads, then builds and runs the key-value-cache container with host
+# networking. Intended for bare-metal/VM Linux hosts; skip this on
+# constrained platforms (shared k8s nodes, WSL, CI) where you don't control
+# the host network stack -- use `make docker-run` there instead.
+set -euo pipefail
 
-echo "Applying kernel optimizations for high-performance networking"
+IMAGE="${IMAGE:-key-value-cache}"
+PORT="${PORT:-7171}"
 
-# Increase the maximum number of pending connections
-sudo sysctl -w net.core.somaxconn=131072
+sysctl_set() {
+	local key="$1" val="$2"
+	if sudo sysctl -w "${key}=${val}" >/dev/null 2>&1; then
+		echo "  ok   ${key}=${val}"
+	else
+		echo "  skip ${key} (not available on this kernel)"
+	fi
+}
 
-# Increase the network backlog to prevent packet loss
-sudo sysctl -w net.core.netdev_max_backlog=500000
+echo "Applying kernel optimizations for high-performance networking..."
 
-# Enable fast reuse of closed connections
-sudo sysctl -w net.ipv4.tcp_tw_reuse=1
-sudo sysctl -w net.ipv4.tcp_tw_recycle=1
+sysctl_set net.core.somaxconn 131072
+sysctl_set net.core.netdev_max_backlog 500000
+sysctl_set net.ipv4.tcp_tw_reuse 1
+sysctl_set net.ipv4.tcp_fin_timeout 10
+sysctl_set net.ipv4.tcp_max_syn_backlog 262144
+sysctl_set net.ipv4.tcp_mem "786432 1048576 1572864"
+sysctl_set net.ipv4.tcp_rmem "4096 87380 6291456"
+sysctl_set net.ipv4.tcp_wmem "4096 87380 6291456"
+sysctl_set net.ipv4.ip_local_port_range "1024 65535"
+sysctl_set net.ipv4.tcp_fastopen 3
+sysctl_set fs.file-max 2097152
+sysctl_set net.ipv4.tcp_keepalive_time 60
+sysctl_set net.ipv4.tcp_keepalive_intvl 10
+sysctl_set net.ipv4.tcp_keepalive_probes 5
 
-# Reduce TCP FIN timeout to free up sockets faster
-sudo sysctl -w net.ipv4.tcp_fin_timeout=10
+# net.ipv4.tcp_syncookies is intentionally left untouched: disabling it
+# (the old default here) removes SYN flood protection and isn't needed for
+# legitimate high-throughput traffic.
+# net.ipv4.tcp_tw_recycle was removed from the kernel in 4.12+ and is not set.
 
-# Increase the max SYN backlog to handle more concurrent connections
-sudo sysctl -w net.ipv4.tcp_max_syn_backlog=262144
+ulimit -n 1048576 2>/dev/null || echo "  skip ulimit -n 1048576 (raise the hard limit in /etc/security/limits.conf if needed)"
 
-# Disable syncookies (only safe if no SYN flood attacks expected)
-sudo sysctl -w net.ipv4.tcp_syncookies=0
+echo "Kernel optimizations applied."
+echo "Building ${IMAGE}..."
+docker build -t "${IMAGE}" .
 
-# Optimize TCP memory buffers
-sudo sysctl -w net.ipv4.tcp_mem="786432 1048576 1572864"
-sudo sysctl -w net.ipv4.tcp_rmem="4096 87380 6291456"
-sudo sysctl -w net.ipv4.tcp_wmem="4096 87380 6291456"
-
-# Expand available local port range to prevent exhaustion
-sudo sysctl -w net.ipv4.ip_local_port_range="1024 65535"
-
-# Enable TCP Fast Open to reduce connection latency
-sudo sysctl -w net.ipv4.tcp_fastopen=3
-
-# Increase the maximum number of open files for high concurrency
-sudo sysctl -w fs.file-max=2097152
-ulimit -n 1048576
-
-# Optimize TCP keepalive settings
-sudo sysctl -w net.ipv4.tcp_keepalive_time=60
-sudo sysctl -w net.ipv4.tcp_keepalive_intvl=10
-sudo sysctl -w net.ipv4.tcp_keepalive_probes=5
-
-echo "Kernel optimizations applied successfully!"
-docker run -p 7171:7171 --ulimit nofile=1048576:1048576 --network=host rushhaabhhh/key-value-cache
+echo "Starting ${IMAGE} on host network, port ${PORT}..."
+docker run --rm -p "${PORT}:${PORT}" \
+	--ulimit nofile=1048576:1048576 \
+	--network=host \
+	-e PORT="${PORT}" \
+	"${IMAGE}"
